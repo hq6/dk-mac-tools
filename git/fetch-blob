@@ -1,0 +1,50 @@
+#!/bin/bash
+# SUMMARY: Push an arbitrary to an named ref
+# HELP: USAGE
+#    dk git fetch-blob <ref|refname under refs/files> [filename] [remote]
+# SUMMARY
+#    When filename is omitted or set to -, this script will write to stdout.
+
+REF_PREFIX=${REF_PREFIX:-refs/files}
+
+if [[ $# -lt 1 ]]; then
+  exec dk help git fetch-blob
+fi
+
+ref="$1"
+
+remote="origin"
+if [[ $# -gt 2 ]]; then
+  remote="$3"
+fi
+
+if ! git ls-remote --exit-code "$remote" > /dev/null 2>&1; then
+  >&2 echo "Remote $remote does not exist!"
+  exit 1
+fi
+
+# First check whether the ref is valid by itself, since it might be a full sha
+# or a full ref.
+>&2 echo "Fetching $ref from remote ${remote}."
+if ! git fetch "$remote" "$ref" > /dev/null 2>&1; then
+  # It was not valid, so let's try to append the prefix.
+  if [[ "$ref" != "${REF_PREFIX}"/* ]]; then
+    ref="${REF_PREFIX}/$1"
+    if git fetch "$remote" "$ref:$ref" > /dev/null 2>&1; then
+      exec dk git get-blob "$@"
+    fi
+  fi
+  >&2 echo "Failed to fetch $ref from ${remote}."
+  exit 1
+fi
+
+# We decouple the fetch from the updating of the local ref so that the first
+# git fetch command will succeed for either a sha or a full reef.
+# Otherwise, a sha requires `git fetch <sha>` while a ref requires `git fetch
+# <ref>:<ref>` and we have to distinguish between them before fetching.
+# If the two are equal, then the ref was a sha. Otherwise we assume it is a
+# ref.
+if [[ "$(git rev-parse $ref 2> /dev/null)" != "$ref" ]]; then
+  git update-ref "$ref" FETCH_HEAD
+fi
+exec dk git get-blob "$@"

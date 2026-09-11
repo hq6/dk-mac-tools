@@ -1,0 +1,116 @@
+#!/usr/bin/expect
+# SUMMARY: Invoke mysql with the credentials
+# HELP:
+# USAGE
+#    export db_password=<db-password>
+#    dk mysql-wrapper <mysql-args>
+# DESCRIPTION
+#    A wrapping script for the mysql client that automatically enters the
+#    pasword when prompted, if one is required.
+# LIMITATIONS
+#    This script does not currently clean up with an unclean exit.
+
+set timeout -1
+set is_tty [expr {[catch {exec tty -s <@ stdin}] == 0}]
+
+# This interact supports the case where stdin is not a tty.
+proc fake_interact {} {
+    global spawn_id user_spawn_id spawn_out is_tty
+
+    # Open a new handle to stdout, because expect's eof handling of user_spawn_id
+    # will close the stdout handle.
+    set d_stdout [open "/dev/fd/1" w]
+    fconfigure $d_stdout -buffering none -translation binary -encoding binary
+
+    # We do not need to log the user since we're explicitly sending process output
+    # to stdout as part of the loop.
+    log_user 0
+
+    # Turn off echo in the spawned tty, which gets us closer to simulating the
+    # current pty talking directly to the underlying process.
+    exec stty -echo < $spawn_out(slave,name)
+
+    # Restore the real terminal because the stty above seems to affect
+    # both the outer pty and inner pty
+    if {$is_tty} {
+       exec stty cooked echo
+    }
+
+    remove_nulls 0
+
+    expect {
+      -i $spawn_id -re "." {
+        puts -nonewline $d_stdout $expect_out(0,string)
+        exp_continue
+      }
+      -i $user_spawn_id -re "." {
+        send -i $spawn_id -- $expect_out(0,string)
+        exp_continue
+      }
+      -i $user_spawn_id eof {
+        send -i $spawn_id "\004"
+      }
+    }
+
+    expect {
+      -i $spawn_id -re "." {
+        puts -nonewline $d_stdout $expect_out(0,string)
+        exp_continue
+      }
+      -i $spawn_id eof { return }
+    }
+    close $d_stdout
+}
+
+proc handle_password {} {
+    global spawn_id
+    expect "Enter password:"
+    if {[info exists ::env(db_password)]} {
+      send -i $spawn_id "$::env(db_password)\r\n"
+    } else {
+      send_tty "Enter password:"
+      stty -echo < /dev/tty
+      expect_tty -re "(.*)\n"
+      stty echo < /dev/tty
+      set db_password $expect_out(1,string)
+      send -i $spawn_id "[set db_password]\r\n"
+    }
+}
+
+proc mysql_using_tty {} {
+    global argv spawn_id spawn_out user_spawn_id
+
+    log_user 0
+    eval spawn mysql $argv
+
+    handle_password
+    # Wait until the interactive prompts so that earlier inputs will not be ignored.
+    expect "mysql>"
+    fake_interact
+}
+
+proc mysql_using_pipe {} {
+    global argv spawn_id spawn_out user_spawn_id child_pid
+
+    log_user 0
+    spawn bash
+
+    set child_pid [exp_pid]
+
+    trap {
+        exec kill -INT $child_pid
+        exit
+    } {INT}
+
+    send "( cat | mysql $argv ) ; exit\r"
+
+    handle_password
+    fake_interact
+}
+
+if {$is_tty || [info exists ::env(MYSQL_WRAPPER_FORCE_TTY)]} {
+    mysql_using_tty
+} else {
+    mysql_using_pipe
+}
+stty sane < /dev/tty

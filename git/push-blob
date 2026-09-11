@@ -1,0 +1,50 @@
+#!/bin/bash
+# SUMMARY: Push an arbitrary file to a named ref
+# HELP: USAGE
+#    # Push a blob from a file.
+#    dk git push-blob <ref|refname under refs/files> <filename> [remote]
+#
+#    # Push a blob from stdin
+#    dk git push-blob <full_ref|refname under refs/files> - [remote]
+#
+# DESCRIPTION
+#    Invoke dk git add-blob on the first two arguments, and then push the ref
+#    to the specified remote which defaults to origin.
+#
+#    If ref does not have the `refs/files/` prefix, the prefix
+#    will be added.
+#
+# LIMITATIONS
+#    Since keys are actually refs, the usual restrictions on ref names and ref
+#    namespaces apply. In particular, after prepending "refs/files/", ref must
+#    satisfy git check-ref-format <ref>, and you cannot have a ref that is a
+#    directory prefix of another ref. For example, you can have foo/bar and
+#    foo as keys, but both cannot exist simultaneously.
+
+if [[ $# -eq 0 ]]; then
+  exec dk help git push-blob
+fi
+
+remote="origin"
+if [[ $# -gt 2 ]]; then
+  remote="$3"
+fi
+
+if ! git ls-remote --exit-code "$remote" > /dev/null 2>&1; then
+  >&2 echo "Remote $remote does not exist!"
+  exit 1
+fi
+
+ref="$(dk git add-blob "$@" 3>&1)"
+
+if [[ $? -eq 0 ]]; then
+  existing_remote_ref="$(git ls-remote "$remote" "$ref")"
+  if [[ -n "$existing_remote_ref" ]]; then
+    previous_sha="$(echo "$existing_remote_ref" | awk '{print $1}')"
+    if [[ "$previous_sha" != "$(git rev-parse $ref)" ]]; then
+      >&2 echo "Previous value of $ref on $remote was ${previous_sha}."
+      git push "$remote" ":$ref"
+    fi
+  fi
+  git push "$remote" "$ref:$ref"
+fi

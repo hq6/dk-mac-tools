@@ -1,0 +1,89 @@
+#!/bin/bash
+# SUMMARY: Add an arbitrary directory to a named ref in the local repo
+# HELP: USAGE
+#    dk git add-tree <path> [ref|refname under refs/dirs]
+
+# DESCRIPTION
+#    When ref is not given, this script will default to adding to
+#    refs/dirs/<dirname>, where <dirname> is simple name of the directory at
+#    the target path. Note that the only characters allowed are alphanumeric, _
+#    and -, and all other characters are removed from the path.
+#
+#    If ref does not have the `refs/dirs/` prefix, the prefix will be added.
+#
+#    This script will disregard .gitignore files unless RESPECT_GIT_IGNORE is
+#    set to true.
+
+# This script defaults to not respecting gitignore.
+RESPECT_GIT_IGNORE=${RESPECT_GIT_IGNORE:-false}
+REF_PREFIX=${REF_PREFIX:-refs/dirs}
+
+if [[ $# -lt 1 ]]; then
+  exec dk help git add-tree
+fi
+
+path="$1"
+if [[ ! -d "$path" ]]; then
+  >&2 echo "Input '$path' is not a directory!"
+  exit 1
+fi
+
+abs_path="$(cd "$path"; pwd)"
+
+# Decline to attempt to handle directories containing `.git` except the current
+# root because git add has weird behaviors with nested .git directories.
+git_dir_count="$(find "$path" -name .git | wc -l)"
+if  [[ $git_dir_count -ge 1 ]]; then
+  if [[  $git_dir_count -gt 1  ]] || [[ "$abs_path" != "$(git rev-parse --show-toplevel)" ]]; then
+    >&2 echo "'$path' contains a nested .git directory, which is unsupported!"
+    exit 1
+  fi
+fi
+
+if [[ $# -gt 1 ]]; then
+  # Ref is given as an argument
+  if [[ "$2" = "${REF_PREFIX}"/* ]]; then
+    ref="$2"
+  else
+    ref="${REF_PREFIX}/$2"
+  fi
+else
+  # Derive the ref from the path
+  sanitized_filename="$(
+    basename "$abs_path" | sed 's/[^-_a-zA-Z0-9]//g'
+  )"
+  ref="${REF_PREFIX}/$(echo "$sanitized_filename")"
+fi
+
+empty_tree="$(git hash-object -t tree /dev/null)"
+GIT_DIR="$(git rev-parse --absolute-git-dir)"
+GIT_INDEX_FILE="$GIT_DIR/.index_alt"
+
+export GIT_INDEX_FILE
+
+
+git read-tree "$empty_tree"
+if [[ "$RESPECT_GIT_IGNORE" = "true" ]]; then
+  git --work-tree="$abs_path" add "$abs_path"
+else
+  git --work-tree="$abs_path" add -f "$abs_path"
+fi
+tree_sha="$(git write-tree)"
+
+>&2 echo "Adding $abs_path to $ref."
+
+existing_ref="$(git show-ref "$ref")"
+if [[ -n "$existing_ref" ]]; then
+  previous_sha="$(echo "$existing_ref" | awk '{print $1}')"
+  if [[ "$previous_sha" != "$tree_sha" ]]; then
+    >&2 echo "Previous value of $ref was ${previous_sha}."
+    git update-ref -d "$ref"
+  fi
+fi
+git update-ref "$ref" "$tree_sha"
+
+# Write ref to FD 3 if it is open. This is useful for scripts that want to consume
+# the information without extra information for humans.
+if (printf '' 1>&3) 2>&-; then
+  >&3 echo "$ref"
+fi

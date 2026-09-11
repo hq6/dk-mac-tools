@@ -1,0 +1,62 @@
+#!/bin/bash
+# SUMMARY: Disable sleep for a fixed amount of time
+# HELP:
+# USAGE
+#    dk disable-sleep-for <timespec>
+#
+#    # Example: Disable sleep for 10 seconds.
+#    dk disable-sleep-for 10
+#
+#    # Example: Disable sleep for 20 minutes.
+#    dk disable-sleep-for 20m
+#
+#    # Example: Disable sleep for 3 hours.
+#    dk disable-sleep-for 3h
+#
+# DESCRIPTION
+#    Disable sleep a given period of time. The time specification is the same
+#    as for the sleep command. This command is intended to solve the problem of
+#    disabling sleep and then forgetting to re-enable it, and then the laptop
+#    running out of batteries.
+#
+#    This program is moderately stateful in the sense that later invocations
+#    will fully override earlier invocations. For example, if you invoke it
+#    with 20 minutes, and then again with 5 minutes immediately afterwards,
+#    sleep will be re-enabled after 5 minutes.
+#
+# LIMITATIONS
+#    This program does not persist sleep-reenable across reboots.
+#    For example, if you use disable-sleep-for 20m, and then you reboot before
+#    20 minutes is up, sleep will not be re-enabled.
+#
+#    In this situation, you would need to manually re-enable sleep by running
+#
+#      sudo pmset disablesleep 0
+
+if [[ $# -ne 1 ]]; then
+  exec dk help disable-sleep-for
+fi
+
+BINARY_INSTALL_DIR="$HOME/.local/sleep-disabler/bin"
+
+# Install on demand
+if [[ ! -f "${BINARY_INSTALL_DIR}/disable-sleep" ]]; then
+  cd "$(dirname "$0")"
+  GIT_ROOT="$(git rev-parse --show-toplevel)"
+  pushd ${GIT_ROOT}/src/sleep-disabler
+  make install
+fi
+
+# Check for PID and kill previous invocation.
+PID_FILE="$BINARY_INSTALL_DIR/restore-sleep.pid"
+if [[ -f "$PID_FILE" ]]; then
+  PID="$(cat "$PID_FILE")"
+  if ps -p $PID > /dev/null 2>&1; then
+    pgid="$(ps -opgid= -p "$PID" | tr -d ' ')"
+    kill -9 $(ps -g "$pgid" -opid=)
+  fi
+fi
+
+"${BINARY_INSTALL_DIR}/disable-sleep"
+(sleep "$1" &&  "${BINARY_INSTALL_DIR}/enable-sleep" ) &
+echo "$!" > "$PID_FILE"

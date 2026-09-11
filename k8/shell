@@ -1,0 +1,46 @@
+#!/bin/bash
+# SUMMARY: Open a shell with context and namespace
+# HELP:
+# USAGE
+#    dk k8 shell <context> <namespace>
+#    dk k8 shell --context <context> -n <namespace>
+
+if [[ $# -lt 2 ]]; then
+    exec dk help k8 shell
+fi
+
+if [[ $# -eq 2 ]]; then
+_current_kube_context="$1"
+_current_kube_namespace="$2"
+elif [[ $# -eq 4 ]]; then
+_current_kube_context="$2"
+_current_kube_namespace="$4"
+else
+    >&2 echo "Unsupported number of arguments, exiting..."
+    exit 1
+fi
+
+kubectl() {
+  command kubectl --context "$_current_kube_context" -n "$_current_kube_namespace" "$@"
+}
+
+# Show the equivalent command without the magic for copy-pasting to others
+kubectl_show() {
+    printf 'kubectl --context "%s" -n "%s"' \
+     "$_current_kube_context" \
+     "$_current_kube_namespace"
+    printf ' %q' "$@"
+    printf '\n'
+}
+
+k_context_ns() {
+cat <<EOF
+Context:   $_current_kube_context
+Namespace: $_current_kube_namespace
+EOF
+}
+
+export _current_kube_context _current_kube_namespace
+export -f kubectl k_context_ns kubectl_show
+
+exec bash -l

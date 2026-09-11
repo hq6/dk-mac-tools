@@ -1,0 +1,110 @@
+#!/bin/bash
+# SUMMARY: Create a commit using tree state from another commit
+# HELP:
+# USAGE
+#    dk git commit-from <commit_sha|ref> [git-commit-args]
+#
+# DESCRIPTION
+#    This command changes the index and current working tree to match the tree
+#    of the named commit, and then invokes `git commit` with the given args.
+#
+#    If the commit is aborted with an empty commit message, the index and
+#    working tree will be left in a state matching the tree of commit_sha.
+#    In this state one can choose to:
+#    * Continue the commit with `git commit`.
+#    * Reset the working tree and index state with `git reset --hard HEAD`.
+#
+#    This command conservatively requires an entirely clean working directory
+#    and index, including ignored files. The easiest way to achieve this
+#    without disrupting your current work is to create a new worktree if you do
+#    not have a spare one handy. The following commands may help:
+#
+#    # Create a new worktree and move to it.
+#    NEW_WT=$HOME/my-new-worktree
+#    git worktree add "$NEW_WT" $(git rev-parse HEAD)
+#    pushd "$NEW_WT"
+#    git checkout <branch_to_make_commit_on>
+#
+#    dk git commit-from <sha> [git-commit-args]
+#
+#    # Clean up the new worktree after we are done with it.
+#    popd
+#    git worktree remove $NEW_WT
+#
+
+if [[ $# -lt 1 ]]; then
+  exec dk help git commit-from
+fi
+
+# We require a ref that can be resolved to a commit. A tree would work
+# semantically, but may result in more confusion for the average user if this
+# script should fail.
+if ! git rev-parse -q --verify "${1}^{commit}" > /dev/null; then
+  >&2 echo "$1 is not a valid revision or tree."
+  exit 1
+fi
+target_rev="$1"
+shift
+
+# Move to the top level directory because some git commands are
+# working-directory sensitive:
+cd "$(git rev-parse --show-toplevel)"
+
+################################################################################
+# Ensure clean working directory, including ignored files.
+################################################################################
+git update-index -q --refresh
+if ! git diff-index --quiet --cached HEAD --; then
+  >&2 echo "Dirty index detected. This script will only run with an entirely clean working directory."
+  exit 1
+fi
+
+if ! git diff-files --quiet; then
+  >&2 echo "Dirty working tree detected. This script will only run with an entirely clean working directory."
+  exit 1
+fi
+
+extra_wd_contents="$(git clean -n -x -d)"
+if [[ -n "$extra_wd_contents" ]]; then
+  >&2 cat <<EOF
+This script will only run with an entirely clean working directory, including
+ignored files.
+
+The following files make the working directory unclean:
+
+$(echo "$extra_wd_contents" | sed 's/^Would remove /    /g')
+
+EOF
+  exit 1
+fi
+
+################################################################################
+# Update the index and working tree to match the target revision, and then
+# invoke git commit with the given args.
+################################################################################
+git read-tree -um "$target_rev"
+
+if ! git diff --quiet "$target_rev" || ! git diff --cached --quiet "$target_rev"; then
+  >&2 cat <<EOF
+Aborting due to observed differences between target revision and working tree
+or index.  This is unexpected and likely indicates a bug in this script or an
+unexpected state in your Git repository. If you had a clean working directory
+prior to running this command, you can restore it by running:
+
+  git reset --hard HEAD
+
+Please generate this commit manually instead by ensuring that your working
+directory is clean and then running the following commands:
+
+  git checkout --no-overlay "$target_rev" —- .
+  # Ensure that output is empty and debug if not.
+  git diff $target_rev
+  git commit
+
+Here is the output of git diff $target_rev:
+EOF
+  git diff "$target_rev"
+  exit
+fi
+
+git commit "$@"

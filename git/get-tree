@@ -1,0 +1,39 @@
+#!/bin/bash
+# SUMMARY: Get an arbitrary directory from named ref in the local repo
+# HELP: USAGE
+#    dk git get-tree <ref|refname under refs/dirs> <path>
+
+# DESCRIPTION
+#    Extract the tree stored at <ref> to <path>, creating <path> if it does not
+#    exist. If <path> exists and there are files with the same names as the
+#    files in the tree, this command will not overwrite them.
+
+REF_PREFIX=${REF_PREFIX:-refs/dirs}
+
+if [[ $# -lt 2 ]]; then
+  exec dk help git get-tree
+fi
+
+if [[ "$(git cat-file -t $1 2> /dev/null)" = "tree" ]] || [[ "$1" = "${REF_PREFIX}"/* ]]; then
+  ref="$1"
+else
+  ref="${REF_PREFIX}/$1"
+fi
+path="$2"
+
+# Check if ref is a valid reference.
+if [[ "$(git cat-file -t $ref 2> /dev/null)" != "tree" ]]; then
+  >&2 echo "Ref $ref does not exist in the local repository."
+  exit 1
+fi
+
+# Actually extrat the tree
+GIT_DIR="$(git rev-parse --absolute-git-dir)"
+GIT_INDEX_FILE="$GIT_DIR/.index_alt"
+export GIT_INDEX_FILE
+
+if ! mkdir -p "$path"; then
+  exit 1
+fi
+git read-tree "$ref"
+git --work-tree="$path" checkout-index --all

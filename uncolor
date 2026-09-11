@@ -1,0 +1,48 @@
+#!/usr/bin/env expect
+# SUMMARY: Remove color in output when running the given program
+# HELP:
+# USAGE
+#    dk uncolor <program> [prog-args]
+# DESCRIPTION
+#    This script runs the given program and strips color codes from the
+#    program's output before showing them to the user.
+#
+#    Set UNCOLOR_LOG_FILE to the name of a file to dump the raw terminal output
+#    into a file.
+#
+#    Set UNCOLOR_DISABLE to run the given program in an interact block without
+#    actually removing colors. This is useful for debugging baseline program
+#    behavior in conjunction with UNCOLOR_LOG_FILE.
+#
+# LIMITATIONS
+#    This script uses regex matching on program output to find and remove ANSI
+#    color codes. In order to match these color codes, it must buffer (and not
+#    render) partial matches until it can determine whether there is a match or
+#    not. This can manifest as screen flickering or line flickering when there
+#    is a large rate of refresh, there is a period of time when expect reads
+#    the prefix but not the suffix of an escape code and so it outputs nothing.
+#
+#    If the program re-renders entire input lines on certain inputs such as
+#    backspaces, this can cause a large number of color codes and other control
+#    sequences that begin with the same prefix of 'ESC['.
+#
+#    For some libraries, NO_COLOR will reduce the flickering while others
+#    require CLICOLOR=0.
+
+if { $argc < 1 } {
+  puts "[exec dk help uncolor]"
+  exit
+}
+
+if { [info exists ::env(UNCOLOR_LOG_FILE) ] } {
+  log_file $::env(UNCOLOR_LOG_FILE)
+}
+eval spawn $argv
+if { [info exists ::env(UNCOLOR_DISABLE) ] } {
+  interact
+  exit 0
+}
+interact {
+ -o
+ -re "\033\[\[0-9;\]*m" {}
+}

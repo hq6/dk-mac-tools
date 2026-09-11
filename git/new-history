@@ -1,0 +1,61 @@
+#!/bin/bash
+# SUMMARY: Start a new history on the given branch
+# HELP:
+# USAGE
+#   dk git new-history <branchname> [starting_content_commit]
+#
+
+if [[ $# -lt 1 ]]; then
+  exec dk help git new-history
+fi
+branch_name="$1"
+
+starting_point=""
+if [[ $# -gt 1 ]]; then
+  if ! git rev-parse --verify -q "$2^{tree}"; then
+    >&2 echo "$2 cannot be resolved a tree!"
+    exit 1
+  fi
+  # We perform the parsing before the git checkout so that symbolic references
+  # such as HEAD can be resolved.
+  starting_point="$(git rev-parse $2)"
+fi
+
+# Move to the top level directory because multiple git commands are
+# working-directory sensitive:
+cd "$(git rev-parse --show-toplevel)"
+
+# Ensure clean working directory, including ignored files.
+git update-index -q --refresh
+if ! git diff-index --quiet --cached HEAD --; then
+  >&2 echo "Dirty index detected. This script will only run with an entirely clean working directory."
+  exit 1
+fi
+
+if ! git diff-files --quiet; then
+  >&2 echo "Dirty working tree detected. This script will only run with an entirely clean working directory."
+  exit 1
+fi
+
+extra_wd_contents="$(git clean -n -x -d)"
+if [[ -n "$extra_wd_contents" ]]; then
+  >&2 cat <<EOF
+This script will only run with an entirely clean working directory, including
+ignored files.
+
+The following files make the working directory unclean:
+
+$(echo "$extra_wd_contents" | sed 's/^Would remove /    /g')
+
+EOF
+  exit 1
+fi
+
+# Do a checkout
+git checkout --orphan "$branch_name"
+git rm -rf .
+
+# Grab the contents from a commit or tree if requested.
+if [[ -n "$starting_point" ]]; then
+  git checkout "$starting_point" -- .
+fi

@@ -1,0 +1,23 @@
+#!/bin/bash
+# SUMMARY: Diff cwd including untracked files against a commit
+
+# This script defaults to respecting gitignore.
+RESPECT_GIT_IGNORE=${RESPECT_GIT_IGNORE:-true}
+
+TARGET_COMMIT="HEAD"
+if [[ $# -gt 0 ]]; then
+  TARGET_COMMIT="$1"
+fi
+
+GIT_ROOT="$(git rev-parse --show-toplevel)"
+GIT_DIR="$(git rev-parse --git-dir)"
+export GIT_INDEX_FILE=$GIT_DIR/.xyz
+rm -f $GIT_INDEX_FILE
+
+git read-tree "$TARGET_COMMIT"
+if [[ "$RESPECT_GIT_IGNORE" = "true" ]]; then
+  git add "$GIT_ROOT"
+else
+  git add -f "$GIT_ROOT"
+fi
+git diff --cached "$TARGET_COMMIT"

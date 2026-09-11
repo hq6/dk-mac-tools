@@ -1,0 +1,43 @@
+#!/bin/bash
+# SUMMARY: Push an arbitrary directory to a named ref
+# HELP: USAGE
+#    dk git push-tree <path> [ref|refname under refs/dirs] [remote]
+#
+# DESCRIPTION
+#    When ref is not given, this script will default to
+#    pushing to refs/dirs/<dirname>, where <dirname> is simple name of the
+#    directory at the target path. Note that the only characters allowed are
+#    alphanumeric, _ and -, and all other characters are removed from the
+#    directory name.
+#
+#    If ref does not have the `refs/dirs/` prefix, the prefix will be added.
+#
+#    If the ref already exists on the remote, it will be overwritten.
+
+if [[ $# -eq 0 ]]; then
+  exec dk help git push-tree
+fi
+
+remote="origin"
+if [[ $# -gt 2 ]]; then
+  remote="$3"
+fi
+
+if ! git ls-remote --exit-code "$remote" > /dev/null 2>&1; then
+  >&2 echo "Remote $remote does not exist!"
+  exit 1
+fi
+
+ref="$(dk git add-tree "$@" 3>&1)"
+
+if [[ $? -eq 0 ]]; then
+  existing_remote_ref="$(git ls-remote "$remote" "$ref")"
+  if [[ -n "$existing_remote_ref" ]]; then
+    previous_sha="$(echo "$existing_remote_ref" | awk '{print $1}')"
+    if [[ "$previous_sha" != "$(git rev-parse $ref)" ]]; then
+      >&2 echo "Previous value of $ref on $remote was ${previous_sha}."
+      git push "$remote" ":$ref"
+    fi
+  fi
+  git push "$remote" "$ref:$ref"
+fi

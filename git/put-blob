@@ -1,0 +1,60 @@
+#!/bin/bash
+# SUMMARY: Add a command line argument to a named ref in the local repo
+# HELP: USAGE
+#    dk git put-blob <ref|refname under refs/files> <value>
+# DESCRIPTION
+#    Create a new Git blob from the second command line argument and point a
+#    reference at it.
+#    If ref does not have the `refs/files/` prefix, the prefix will be added.
+#    If the ref already exists, this command will overwrite it.
+#
+#    This script exists mostly to make commands for putting values from shell
+#    variables into git more readable. Any invocation of dk git put-blob can be
+#    translated into an invocation of dk git add-blob as follows.
+#
+#    dk git put-blob hello_world "Hello World!"
+#
+#    # Equivalent
+#    echo -n "Hello World!" | dk git add-blob hello_world
+#
+# LIMITATIONS
+#    Since keys are actually refs, the usual restrictions on ref names and ref
+#    namespaces apply. In particular, after prepending "refs/files/", ref must
+#    satisfy git check-ref-format <ref>, and you cannot have a ref that is a
+#    directory prefix of another ref. For example, you can have foo/bar and
+#    foo as keys, but both cannot exist simultaneously.
+
+REF_PREFIX=${REF_PREFIX:-refs/files}
+
+if [[ $# -lt 2 ]]; then
+  exec dk help git put-blob
+fi
+
+# Normalize the ref.
+if [[ "$1" = "${REF_PREFIX}"/* ]]; then
+  ref="$1"
+else
+  ref="${REF_PREFIX}/$1"
+fi
+
+# Add the blob
+blob_sha="$(echo -n "$2" | git hash-object -w --stdin)"
+
+existing_ref="$(git show-ref "$ref")"
+if [[ -n "$existing_ref" ]]; then
+  previous_sha="$(echo "$existing_ref" | awk '{print $1}')"
+  if [[ "$previous_sha" != "$blob_sha" ]]; then
+    >&2 echo "Previous value of $ref was ${previous_sha}."
+    git update-ref -d "$ref"
+  fi
+fi
+git update-ref "$ref" "$blob_sha" > /dev/null
+
+# Write to FD 3 if it is open. This is useful for scripts that want to consume
+# the information without extra information for humans.
+# To consume this ref, a calling script can open FD 3 and direct it to stdout to
+# collect the output in a variable.
+# REF="$(dk git put-blob key1 value1 3>&1)"
+if (printf '' 1>&3) 2>&-; then
+  >&3 echo "$ref"
+fi

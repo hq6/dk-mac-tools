@@ -1,0 +1,33 @@
+#!/bin/bash
+# SUMMARY: List the direct refs to trees stored in Git
+# HELP:
+# USAGE
+#    dk git ls-blob [-r] [remote_name]
+# DESCRIPTION
+#    List the refs under REF_PREFIX, which defaults to refs/dirs.
+#
+#    By default, we list the refs locally. When `-r` is given, we list the
+#    remote references under the same path. If `remote_name` is given, use that
+#    instead of `origin`.
+REF_PREFIX=${REF_PREFIX:-refs/dirs}
+
+list_remote=false
+remote=origin
+if [[ $# -gt 0 ]]; then
+  if [[ $1 = "-r" ]]; then
+    list_remote=true
+  else
+    >&2 echo "Unrecognized option ${1}."
+    exit 1
+  fi
+fi
+
+if [[ $# -gt 1 ]]; then
+  remote="$2"
+fi
+
+if [[ $list_remote = "true" ]]; then
+  git ls-remote "$remote" "${REF_PREFIX}/*"
+else
+   git for-each-ref --format="%(objectname)        %(refname)" "${REF_PREFIX}/**"
+fi

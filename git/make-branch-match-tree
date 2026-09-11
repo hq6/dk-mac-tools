@@ -1,0 +1,71 @@
+#!/bin/bash
+# SUMMARY: Make the tip of a given branch match another commit
+# HELP:
+# USAGE
+#    dk git make-branch-match-tree <branch> <commit_sha|ref>
+#
+# DESCRIPTION
+#    This command takes a non-current branch and adds a single commit to it.
+#    This commit makes the tip of the branch equal to the same git tree as a
+#    specified target commit.
+
+if [[ $# -lt 2 ]]; then
+  exec dk help git make-branch-match-tree
+fi
+target_branch="$1"
+target_commit="$2"
+
+# Validate that the branch exists and the commit exists.
+if ! git show-ref --quiet refs/heads/$target_branch; then
+  >&2 echo "Local branch '$target_branch' does not exist."
+  exit 1
+fi
+
+if ! git rev-parse --verify "${target_commit}^{commit}" 2> /dev/null; then
+  >&2 echo "Target commit ${target_commit} does not exist."
+  exit 1
+fi
+
+# Validate that the branch is not checked out in any working tree.
+checked_out_branches="$(git branch | awk 'NF > 1 {print $2}')"
+for branch in $checked_out_branches; do
+  if [[ "$branch" = "$target_branch" ]]; then
+    >&2 echo "Target branch '${target_branch}' is already checked out."
+    >&2 echo "This command only works on non-current branches."
+    exit 1
+  fi
+done
+
+
+# Create a new working tree in $HOME and invoke dk git commit-from. The home
+# directory is used to ensure that dk git commit-from is available from
+# $HOME/dkbin.
+working_tree_dir="$(mktemp -p "$HOME" -d)"
+rmdir "$working_tree_dir"
+cleanup() {
+  rm -rf "$working_tree_dir"
+  git worktree remove "$working_tree_dir"
+}
+trap cleanup EXIT
+
+git worktree add "$working_tree_dir" $(git rev-parse HEAD)
+pushd "$working_tree_dir"
+
+git checkout "$target_branch"
+target_commit_sha="$(git rev-parse "$target_commit")"
+dk git commit-from "$target_commit" --allow-empty -F - <<EOF
+Create commit with tree from ${target_commit_sha}.
+
+To learn about the original commit, use the following commands:
+
+  git fetch origin ${target_commit_sha}
+  git log ${target_commit_sha}
+  git show ${target_commit_sha}
+
+To validate that the current commit matches the intended commit, you can run
+
+  git diff ${target_commit_sha} <insert_this_commit_sha>
+EOF
+
+# Clean up the new worktree after we are done with it.
+popd

@@ -1,0 +1,35 @@
+#!/bin/bash
+# SUMMARY: Extract a file out of a local git repository by ref
+# HELP: USAGE
+#    dk git get-blob <ref|refname under refs/files> [filename]
+# DESCRIPTION
+#    When filename is omitted or set to -, this script will write to stdout.
+
+REF_PREFIX=${REF_PREFIX:-refs/files}
+
+if [[ $# -lt 1 ]]; then
+  exec dk help git get-blob
+fi
+
+if [[ "$(git cat-file -t $1 2> /dev/null)" = "blob" ]] || [[ "$1" = "${REF_PREFIX}"/* ]]; then
+  ref="$1"
+else
+  ref="${REF_PREFIX}/$1"
+fi
+
+# Check if ref is a valid reference.
+if [[ "$(git cat-file -t $ref 2> /dev/null)" != "blob" ]]; then
+  >&2 echo "Ref $ref does not exist in the local repository."
+  exit 1
+fi
+
+filename="-"
+if [[ $# -gt 1 ]]; then
+  filename="$2"
+fi
+
+if [[ "$filename" = "-" ]]; then
+  git cat-file -p "$ref"
+else
+  git cat-file -p "$ref" > "$filename"
+fi
