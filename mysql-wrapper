@@ -86,6 +86,7 @@ proc mysql_using_tty {} {
     handle_password
     # Wait until the interactive prompts so that earlier inputs will not be ignored.
     expect "mysql>"
+    send_user "mysql>"
     fake_interact
 }
 
