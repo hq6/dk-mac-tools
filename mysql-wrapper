@@ -50,6 +50,10 @@ proc fake_interact {} {
       -i $user_spawn_id eof {
         send -i $spawn_id "\004"
       }
+      -i $spawn_id eof {
+        close $d_stdout
+        return
+      }
     }
 
     expect {
